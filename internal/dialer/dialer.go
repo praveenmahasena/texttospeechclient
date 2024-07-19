@@ -1,10 +1,12 @@
 package dialer
 
 import (
-	"bufio"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"os"
+	"sync"
 )
 
 type Dialer struct {
@@ -29,19 +31,35 @@ func (d *Dialer) Start() error {
 		return conErr
 	}
 
-	if _, err := con.Write(d.file); err != nil {
-		return err
-	}
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
+		if _, err := con.Write(d.file); err != nil {
+			con.Close()
+			log.Fatalln(err)
+		}
+	}(wg)
 
-	go func(c net.Conn) {
-		r := bufio.NewReader(c)
-		r.WriteTo(os.Stdout)
-		os.Exit(0)
-	}(con)
+	wg.Add(1)
 
-	select {}
+	go func(c net.Conn, w *sync.WaitGroup) {
+		defer wg.Done()
 
-	// return nil
+		data, dataErr := io.ReadAll(c)
+
+		fmt.Println(string(data))
+
+		if dataErr != nil {
+			log.Fatalln(dataErr)
+		}
+
+	}(con, wg)
+
+	wg.Wait()
+	con.Close()
+
+	return nil
 }
 
 func (d *Dialer) getFile() error {
@@ -50,14 +68,14 @@ func (d *Dialer) getFile() error {
 		return dirErr
 	}
 
-	var fileName string = "Ai.m4a"
+	var fileName string
 
-	fmt.Println("write file name")
+	fmt.Fscan(os.Stdin, &fileName)
 
 	file, fileErr := os.ReadFile(dir + "/" + fileName)
 
 	if fileErr != nil {
-		return nil
+		return fileErr
 	}
 
 	d.file = file
